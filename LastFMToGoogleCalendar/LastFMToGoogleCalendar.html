@@ -1,0 +1,447 @@
+<p>Have you missed any good concerts in your town lately? Let's put an end to that right now with three Choreos and a small amount of Java code. In this example, you'll build a simple application that connects to Last.fm, retrieves an XML list of "events" associated with a list of your favorite bands, extracts the artist name, venue, city, and date for each event item, and adds an event to your Google Calendar if the event occurs in the city that you specify.</p>
+<h1>Before You Begin</h1>
+<p>Before you start this tutorial, you should:</p>
+<ul>
+<li>Have a Temboo account</li>
+<li>Have some experience coding in Java using an IDE like Eclipse</li>
+<li>Download and install the Temboo <a href="/entries/20940672-introducing-the-sdk" target="_self">Java SDK</a></li>
+<li>Have your Last.fm API Key which you can apply for <a href="http://www.last.fm/api/account" target="_self">here</a></li>
+<li>Have the Oauth 2.0 credentials associated with your <a href="https://code.google.com/apis/console" target="_self">Google Developer account</a>. Google's <a href="https://code.google.com/oauthplayground/" target="_self">Oauth Playground</a> can also be useful for obtaining your Access Token and Refresh Token after you've registered your project with Google.</li>
+</ul>
+<p>If you don't have an account yet, you can sign up for one <a href="http://www.temboo.com/public/signup" target="_blank">here</a> &#8212; it's free. Once you have an account you can download the Temboo Java SDK <a href="https://www.temboo.com/download" target="_blank">here</a>, and find out how to install it <a href="/entries/20940807-installing-the-java-sdk" target="_self">here</a>.</p>
+<p>This tutorial uses three Choreos from the <a href="/entries/20916866-understanding-the-choreo-library" target="_self">Choreo Library</a>:</p>
+<ul>
+<li><strong>Last.fm.Artist.GetEvents</strong> retrieves a list of upcoming events for an artist that you specify.</li>
+<li><strong>Google.Calendar.SearchCalendarsByName</strong> returns calendar details (including the calendar id) for the calendar that you specify by name.</li>
+<li><strong>Google.Calendar.CreateEvent</strong> creates a new event in your Google Calendar.</li>
+</ul>
+<p>All Choreos are installed with the SDK, along with all the other Choreos in the Library.</p>
+<h1>Step 1: Specify your constants</h1>
+<ol>
+<li>Create a new Java project in your IDE.</li>
+<li>Create a new Java class called LastFMToGoogleCalendar.</li>
+<li>Specify values for the following constants:</li>
+<pre>
+	public class LastFMToGoogleCalendar {
+	
+		// Use this constant to specify your city. If events are found in this city, it will be added to your Google Calendar.
+		private static final String MY_CITY = "New York";
+
+		// For this constant, specify a list of band names that may have events on Last.fm that you want to add to Google Calendar.
+		private static String [] BAND_NAMES = {"First Aid Kit", "Slow Club", "Beach House"};
+
+		// Use this constant to define your Last.fm API KEY.
+		// You can apply for an API Key by going here: http://www.last.fm/api/account.
+		// (Replace with your own Last.fm API Key.)
+		private static final String LAST_FM_API_KEY = "YOUR_API_KEY";
+
+		// Use this constant to define your Google oAuth 2.0 credentials.
+		// If you don't already have the oAuth credentials associated with your Google account, login to your Google account, 
+		// create a project and generate your oAuth 2.0 ClientID and ClientSecret here https://code.google.com/apis/console/.
+		// After doing that, use Google's oAuth playground to generate your AccessToken and RefreshToken here: https://code.google.com/oauthplayground/.
+		private static final String GOOGLE_CLIENT_ID = "YOUR_CLIENT_ID";
+		private static final String GOOGLE_CLIENT_SECRET = "YOUR_CLIENT_SECRET";
+		private static final String GOOGLE_ACCESS_TOKEN = "YOUR_ACCESS_TOKEN";
+		private static final String GOOGLE_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN";
+
+		// Set your calendar name here. Make sure you provide the name of an existing Google calendar.
+		// Note, if there are multiple calendars with the same name, the first one returned will be used.
+		private static final String GOOGLE_CALENDAR_NAME = "YOUR_GOOGLE_CALENDAR_NAME";
+		
+		// Use these constants to define the set of credentials that will be used to connect with Temboo.
+		// (Replace with your own Temboo Application Key.)
+		private static final String TEMBOO_APPLICATIONKEY_NAME = "YOUR_TEMBOO_APPLICATIONKEY_NAME";
+		private static final String TEMBOO_APPLICATIONKEY = "YOUR_TEMBOO_APPLICATIONKEY";
+</pre>
+<h1>Step 2: Retrieve the id of your existing Google Calendar</h1>
+<ol>
+<li>First, add a "main" method to the class.</li>
+<li>Setup the Temboo session object. Your code should look like this:
+<pre>
+		// Create a new Temboo session, that will be used to run Temboo SDK choreos.
+		// (Replace with your own Temboo Application Key name + key.)
+		public static void main(String[] args) throws Exception {
+		MyTemboo session = new MyTemboo(TEMBOO_APPLICATIONKEY_NAME, TEMBOO_APPLICATIONKEY);
+</pre>
+<li>If we find an event in your city, we need to first get the calendar id for your existing calendar so that we can pass this to the CreateEvent choreo. Use the following code to set the inputs and execute the Google.Calendar.SearchCalendarsByName choreo.</li>
+<pre>
+		// To create a calendar event, we need the calendar id. Execute the SearchCalendarsByName to get this id.
+		// Instantiate the Google.Calendar.SearchCalendarsByName Choreo, using the session object
+		SearchCalendarsByName searchCals = new com.temboo.Library.Google.Calendar.SearchCalendarsByName(session);
+
+		// Get an InputSet object for the SearchCalendarsByName, and populate the inputs. This choreo takes inputs
+		// specifying a calendar name and your oAuth 2.0 credentials.
+		SearchCalendarsByNameInputSet searchCalsInput = searchCals.newInputSet();
+
+		searchCalsInput.set_AccessToken(GOOGLE_ACCESS_TOKEN);
+		searchCalsInput.set_CalendarName(GOOGLE_CALENDAR_NAME);
+		searchCalsInput.set_ClientID(GOOGLE_CLIENT_ID);
+		searchCalsInput.set_ClientSecret(GOOGLE_CLIENT_SECRET);
+		searchCalsInput.set_RefreshToken(GOOGLE_REFRESH_TOKEN);
+
+		// Execute SearchCalendarsByName and retrieve the results from Google Calendar.
+		SearchCalendarsByNameResultSet searchCalsResults = searchCals.execute(searchCalsInput);
+
+		// Print some debugging info with the calendar id that was returned.
+		System.out.println("Retrieved calendar id for " + GOOGLE_CALENDAR_NAME + ": " + searchCalsResults.get_CalendarId());
+</pre>
+<h1>Step 3: Retrieve Artist Events from Last.fm</h1>
+<ol>
+<li>Now you want to setup a loop to iterate over the list of band names from above. We want to execute the GetEvents Choreo for each band in this list:</li>
+<pre>
+		// Iterate over band names.
+		for( String bandName : BAND_NAMES ) {
+</pre>
+<li>Now we're ready to set the inputs, execute, and print some debugging info for the GetEvents Choreo for every band name in our list:</li>
+<pre>
+		// Instantiate the LastFM.Artists.GetEvents Choreo, using the session object.
+		GetEvents getEvents = new com.temboo.Library.LastFm.Artist.GetEvents(session);
+
+		// Get an InputSet object for GetEvents, and populate the inputs. This choreo takes inputs
+		// specifying a band name, a limit of events to return, and your Last.fm API Key.
+		GetEventsInputSet getEventsInput = getEvents.newInputSet();
+
+		getEventsInput.set_APIKey(LAST_FM_API_KEY);
+		getEventsInput.set_Artist(bandName);
+		getEventsInput.set_Limit("50");
+
+		// Execute GetEvents, and retrieve event results from Last.fm.
+		GetEventsResultSet getEventsResults = getEvents.execute(getEventsInput);
+
+		// Print some debugging info to make sure that this is working.
+		System.out.println("Retrieved XML results for " + bandName + " events from Last.fm");
+</pre>
+</li>
+</ol>
+<p>At this point, you should be able to run the Java application and see the XML retrieved from Last.fm in your IDE console. Note that you'll need to close your loop by adding an extra end curly bracket.</p>
+<h1>Step 4: Parse the XML Retrieved from Last.fm</h1>
+<p>There are a number of good Java libraries for parsing XML data, and if you've worked with Java extensively you probably already have one you're comfortable using. If not, some of our favorites are <a href="http://dom4j.sourceforge.net" target="_blank">Dom4j</a>,&nbsp;<a href="http://xerces.apache.org/xerces-j" target="_blank"><span style="color: #000000; font-family: arial,helvetica,sanserif;">Xerces-J</span></a>, and <a href="http://www.xom.nu" target="_blank">XOM</a>. This tutorial, however, uses the <a href="http://docs.oracle.com/javase/6/docs/api/index.html?org/w3c/dom/package-summary.html" target="_blank">org.w3c.dom package</a> that comes bundled with standard JRE packages; it's used internally by the Temboo Java SDK.</p>
+<p><strong>To parse the <strong>GetEvents</strong> Choreo XML:</strong></p>
+<ol>
+<li>The XML retrieved from Last.fm is returned as a standard Java String. The easiest way to parse it is to use the following code to convert the data into a structured XML Document object:
+<pre>
+		// Convert the Last.fm data into XML.
+		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+		factory.setValidating(false);
+		factory.setNamespaceAware(false);
+
+		DocumentBuilder builder = factory.newDocumentBuilder();
+		Document doc = builder.parse(
+				new InputSource(
+						new ByteArrayInputStream(
+								getEventsResults.get_Response().getBytes("utf-8"))));
+</pre>
+</li>
+<li>Next you'll extract relevant pieces of information from the XML returned by Last.fm. Go <a href="https://live.temboo.com/library/Library/LastFm/Artist/GetEvents/" target="_blank">here</a> to see a sample of the XML that is returned by this choreo.
+<li>Notice that each event result is represented by an &lt;event&gt; XML element, and that each &lt;event&gt; element contains sub-elements that specify details about that event.</li>
+<li>Use the following code to get the set of &lt;event&gt; elements:
+<pre>
+		// Extract the set of elements from the result XML.
+		NodeList event = doc.getElementsByTagName("event");
+</pre>
+For this example, you'll extract the startDate, artist, city, and venue name for each event.</li>
+<li>Use the following code to loop over the set of &lt;event&gt; elements and extract these fields:
+<pre>
+		// Loop over the set of <event> elements, and extract startDate, artist, city, and venue name from each event.
+		for(int i=0; i &lt; event.getLength(); i++) {			
+
+			Element eventEntry = (Element) event.item(i);
+
+			// Extract the <startDate> element for this status.
+			NodeList eventDates = eventEntry.getElementsByTagName("startDate");
+			Element eventDate = (Element) eventDates.item(0);
+			String formattedDate = eventDate.getTextContent();
+
+			// Extract the <artist> element for this status.
+			NodeList artists = eventEntry.getElementsByTagName("artist");
+			Element artist = (Element) artists.item(0);
+			String artistName = artist.getTextContent();
+
+			// Extract the <city> element for this status.
+			NodeList cities = eventEntry.getElementsByTagName("city");
+			Element city = (Element) cities.item(0);
+			String cityName = city.getTextContent();
+
+			// Extract the <venue><name> element for this status.
+			NodeList venues = eventEntry.getElementsByTagName("name");
+			Element venue = (Element) venues.item(0);
+			String venueName = venue.getTextContent();
+</pre>
+</li>
+<li> The next step is to determine if any of these events are occurring in the city that you've specified for the _MY_CITY constant. Use the following IF statement to do this:
+<pre>
+		// If the value of <city> = MY_CITY (i.e. New York) then retrieve the calendar id by searching calendars by name and create a new Google Calendar event.
+		if (cityName.contains(MY_CITY))
+		{
+
+		// Print out some debugging info.
+		System.out.println("Found an event for " + bandName + " in my city!");
+</pre>
+</li>
+</ol>
+<h1>Step 5: Create a New Event in a Google Calendar for this Last.fm Event</h1>
+<ol>
+<li>Now, let's take a step back for a moment. Our goal is to create Google Calendar events with these events from Last.fm. But the startDates for events that are returned from Last.fm are not in the same format that Google expects. So we need to format the date in a slightly different way. Use the following code to format the date so that we can pass it to the Google Calendar CreateEvent Choreo:</li>
+<pre>
+		// The date that was parsed from the Last.fm response needs to be formatted differently when it is passed to the Google Calendar CreateEvent Choreo. 
+		// Create SimpleDateFormat object with source string date format.
+		SimpleDateFormat dateSource = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss");
+
+		// Parse the string into Date object. Note that formattedDate is the variable that we stored the Last.fm event date in.
+		Date date = dateSource.parse(formattedDate);
+
+		// Create SimpleDateFormat object with desired date and time format.
+		// Note that you might need to adjust this depending on what timezone you're in.
+		SimpleDateFormat dateTarget = new SimpleDateFormat("yyyy-MM-dd");
+		SimpleDateFormat timeTarget = new SimpleDateFormat("HH:mm:ss");
+
+		// Parse the date and time into different formats.
+		formattedDate = dateTarget.format(date);	      
+		String formattedTime = timeTarget.format(date);
+
+		// Print the date and time formatting result for debugging purposes.
+		System.out.println("Converted date is: " + formattedDate);
+		System.out.println("Converted time is: " + formattedTime);
+</pre>
+<li>Now you're ready to pass our extracted values from the Last.fm response into the CreateEvent Google Choreo. You're code for setting inputs and executing the CreateEvent choreo should look like this:</li>
+<pre>
+		// Now we're ready to create the event in the Google Calendar.
+		// Instantiate the Google.Calendar.CreateEvent Choreo, using the session object.
+		CreateEvent createEvent = new CreateEvent(session);
+
+		// Get an InputSet object for the CreateEvent, and populate the inputs. This choreo takes inputs
+		// specifying calendar id (which we retrieved already), start/end dates and times, event description, event title, and your oAuth 2.0 credentials.
+		// Note that we'll just pass in the same date and time for start and end dates because we don't really know how long the concert will last.
+		CreateEventInputSet createEventInput = createEvent.newInputSet();
+
+		createEventInput.set_AccessToken(GOOGLE_ACCESS_TOKEN);
+		createEventInput.set_CalendarID(searchCalsResults.get_CalendarId());
+		createEventInput.set_ClientID(GOOGLE_CLIENT_ID);
+		createEventInput.set_ClientSecret(GOOGLE_CLIENT_SECRET);
+		createEventInput.set_EndDate(formattedDate);
+		createEventInput.set_EndTime(formattedTime);
+		createEventInput.set_EventDescription(venueName);
+		createEventInput.set_EventTitle(artistName);
+		createEventInput.set_RefreshToken(GOOGLE_REFRESH_TOKEN);
+		createEventInput.set_StartDate(formattedDate);
+		createEventInput.set_StartTime(formattedTime);
+
+		try {
+			// Execute CreateEvent (Note that in this case, we don't care about the results returned by the choreo).
+			createEvent.execute(createEventInput);
+
+			System.out.println("Created a Google Calendar event for " + bandName + " on " + formattedDate + " at " + formattedTime);
+		} catch(TembooException e) {
+			System.out.println("Uh-oh! Something went wrong created the event in the Google Calendar. The error from the choreo was: " + e.getMessage());
+</pre>
+</ol>
+<br /><br />The full code for your Java application should now look like this:
+<pre>
+	import java.io.ByteArrayInputStream;
+	import java.text.SimpleDateFormat;
+	import java.util.Date;
+
+	import javax.xml.parsers.DocumentBuilder;
+	import javax.xml.parsers.DocumentBuilderFactory;
+
+	import org.w3c.dom.Document;
+	import org.w3c.dom.Element;
+	import org.w3c.dom.NodeList;
+	import org.xml.sax.InputSource;
+
+	import com.temboo.Library.Google.Calendar.CreateEvent;
+	import com.temboo.Library.Google.Calendar.SearchCalendarsByName;
+	import com.temboo.Library.Google.Calendar.CreateEvent.CreateEventInputSet;
+	import com.temboo.Library.Google.Calendar.SearchCalendarsByName.SearchCalendarsByNameInputSet;
+	import com.temboo.Library.Google.Calendar.SearchCalendarsByName.SearchCalendarsByNameResultSet;
+	import com.temboo.Library.LastFm.Artist.GetEvents;
+	import com.temboo.Library.LastFm.Artist.GetEvents.GetEventsInputSet;
+	import com.temboo.Library.LastFm.Artist.GetEvents.GetEventsResultSet;
+	import com.temboo.aaron__167.MyTemboo;
+	import com.temboo.core.TembooException;
+
+
+	public class LastFMToGoogleCalendar {
+
+		// Use this constant to specify your city. If events are found in this city, it will be added to your Google Calendar.
+		private static final String MY_CITY = "New York";
+
+		// For this constant, specify a list of band names that may have events on Last.fm that you want to add to Google Calendar.
+		private static String [] BAND_NAMES = {"First Aid Kit", "Slow Club", "Beach House"};
+
+		// Use this constant to define your Last.fm API KEY.
+		// You can apply for an API Key by going here: http://www.last.fm/api/account.
+		// (Replace with your own Last.fm API Key.)
+		private static final String LAST_FM_API_KEY = "YOUR_API_KEY";
+
+		// Use this constant to define your Google oAuth 2.0 credentials.
+		// If you don't already have the oAuth credentials associated with your Google account, login to your Google account, 
+		// create a project and generate your oAuth 2.0 ClientID and ClientSecret here https://code.google.com/apis/console/.
+		// After doing that, use Google's oAuth playground to generate your AccessToken and RefreshToken here: https://code.google.com/oauthplayground/.
+		private static final String GOOGLE_CLIENT_ID = "YOUR_CLIENT_ID";
+		private static final String GOOGLE_CLIENT_SECRET = "YOUR_CLIENT_SECRET";
+		private static final String GOOGLE_ACCESS_TOKEN = "YOUR_ACCESS_TOKEN";
+		private static final String GOOGLE_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN";
+
+		// Set your calendar name here. Make sure you provide the name of an existing Google calendar.
+		// Note, if there are multiple calendars with the same name, the first one returned will be used.
+		private static final String GOOGLE_CALENDAR_NAME = "YOUR_GOOGLE_CALENDAR_NAME";
+		
+		// Use these constants to define the set of credentials that will be used to connect with Temboo.
+		// (Replace with your own Temboo Application Key.)
+		private static final String TEMBOO_APPLICATIONKEY_NAME = "YOUR_TEMBOO_APPLICATIONKEY_NAME";
+		private static final String TEMBOO_APPLICATIONKEY = "YOUR_TEMBOO_APPLICATIONKEY";
+
+		// Create a new Temboo session, that will be used to run Temboo SDK choreos.
+		// (Replace with your own Temboo Application Key name + key.)
+		public static void main(String[] args) throws Exception {
+			
+			// Create a new Temboo session, that will be used to run Temboo SDK choreos.
+			// (Replace with your own Temboo Application Key name + key.)
+			MyTemboo session = new MyTemboo(TEMBOO_APPLICATIONKEY_NAME, TEMBOO_APPLICATIONKEY);
+			
+			// To create a calendar event, we need the calendar id. Execute the SearchCalendarsByName to get this id.
+			// Instantiate the Google.Calendar.SearchCalendarsByName Choreo, using the session object
+			SearchCalendarsByName searchCals = new com.temboo.Library.Google.Calendar.SearchCalendarsByName(session);
+
+			// Get an InputSet object for the SearchCalendarsByName, and populate the inputs. This choreo takes inputs
+			// specifying a calendar name and your oAuth 2.0 credentials.
+			SearchCalendarsByNameInputSet searchCalsInput = searchCals.newInputSet();
+
+			searchCalsInput.set_AccessToken(GOOGLE_ACCESS_TOKEN);
+			searchCalsInput.set_CalendarName(GOOGLE_CALENDAR_NAME);
+			searchCalsInput.set_ClientID(GOOGLE_CLIENT_ID);
+			searchCalsInput.set_ClientSecret(GOOGLE_CLIENT_SECRET);
+			searchCalsInput.set_RefreshToken(GOOGLE_REFRESH_TOKEN);
+
+			// Execute SearchCalendarsByName and retrieve the results from Google Calendar.
+			SearchCalendarsByNameResultSet searchCalsResults = searchCals.execute(searchCalsInput);
+
+			// Print some debugging info with the calendar id that was returned.
+			System.out.println("Retrieved calendar id for " + GOOGLE_CALENDAR_NAME + ": " + searchCalsResults.get_CalendarId());
+
+			// Iterate over band names.
+			for( String bandName : BAND_NAMES ) {
+
+				// Instantiate the LastFM.Artists.GetEvents Choreo, using the session object.
+				GetEvents getEvents = new com.temboo.Library.LastFm.Artist.GetEvents(session);
+
+				// Get an InputSet object for GetEvents, and populate the inputs. This choreo takes inputs
+			    // specifying a band name, a limit of events to return, and your Last.fm API Key.
+				GetEventsInputSet getEventsInput = getEvents.newInputSet();
+
+				getEventsInput.set_APIKey(LAST_FM_API_KEY);
+				getEventsInput.set_Artist(bandName);
+				getEventsInput.set_Limit("50");
+
+				// Execute GetEvents, and retrieve event results from Last.fm.
+				GetEventsResultSet getEventsResults = getEvents.execute(getEventsInput);
+
+				// Print some debugging info to make sure that this is working.
+				System.out.println("Retrieved XML results for " + bandName + " events from Last.fm");
+
+				// Convert the Last.fm data into XML.
+				DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+				factory.setValidating(false);
+				factory.setNamespaceAware(false);
+
+				DocumentBuilder builder = factory.newDocumentBuilder();
+				Document doc = builder.parse(
+						new InputSource(
+								new ByteArrayInputStream(
+										getEventsResults.get_Response().getBytes("utf-8"))));
+
+				// Extract the set of elements from the result XML.
+				NodeList event = doc.getElementsByTagName("event");
+
+				// Loop over the set of &lt;event&gt; elements, and extract startDate, artist, city, and venue name from each event.
+				for(int i=0; i &lt; event.getLength(); i++) {			
+
+					Element eventEntry = (Element) event.item(i);
+
+					// Extract the &lt;startDate&gt; element for this status.
+					NodeList eventDates = eventEntry.getElementsByTagName("startDate");
+					Element eventDate = (Element) eventDates.item(0);
+					String formattedDate = eventDate.getTextContent();
+
+					// Extract the &lt;artist&gt; element for this status.
+					NodeList artists = eventEntry.getElementsByTagName("artist");
+					Element artist = (Element) artists.item(0);
+					String artistName = artist.getTextContent();
+
+					// Extract the &lt;city&gt; element for this status.
+					NodeList cities = eventEntry.getElementsByTagName("city");
+					Element city = (Element) cities.item(0);
+					String cityName = city.getTextContent();
+
+					// Extract the &lt;venue&gt;&lt;name&gt; element for this status.
+					NodeList venues = eventEntry.getElementsByTagName("name");
+					Element venue = (Element) venues.item(0);
+					String venueName = venue.getTextContent();
+
+					// If the value of &lt;city&gt; = MY_CITY (i.e. New York) then retrieve the calendar id by searching calendars by name and create a new Google Calendar event.
+					if (cityName.contains(MY_CITY))
+					{
+
+						// Print out some debugging info.
+						System.out.println("Found an event for " + bandName + " in my city!");
+
+						// The date that was parsed from the Last.fm response needs to be formatted differently when it is passed to the Google Calendar CreateEvent Choreo. 
+						// Create SimpleDateFormat object with source string date format.
+						SimpleDateFormat dateSource = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss");
+
+						// Parse the string into Date object. Note that formattedDate is the variable that we stored the Last.fm event date in.
+						Date date = dateSource.parse(formattedDate);
+
+						// Create SimpleDateFormat object with desired date and time format.
+						// Note that you might need to adjust this depending on what timezone you're in.
+						SimpleDateFormat dateTarget = new SimpleDateFormat("yyyy-MM-dd");
+						SimpleDateFormat timeTarget = new SimpleDateFormat("HH:mm:ss");
+
+						// Parse the date and time into different formats.
+						formattedDate = dateTarget.format(date);	      
+						String formattedTime = timeTarget.format(date);
+
+						// Print the date and time formatting result for debugging purposes.
+						System.out.println("Converted date is: " + formattedDate);
+						System.out.println("Converted time is: " + formattedTime);
+
+						// Now we're ready to create the event in the Google Calendar.
+						// Instantiate the Google.Calendar.CreateEvent Choreo, using the session object.
+						CreateEvent createEvent = new CreateEvent(session);
+
+						// Get an InputSet object for the CreateEvent, and populate the inputs. This choreo takes inputs
+						// specifying calendar id (which we retrieved already), start/end dates and times, event description, event title, and your oAuth 2.0 credentials.
+						// Note that we'll just pass in the same date and time for start and end dates because we don't really know how long the concert will last.
+						CreateEventInputSet createEventInput = createEvent.newInputSet();
+
+						createEventInput.set_AccessToken(GOOGLE_ACCESS_TOKEN);
+						createEventInput.set_CalendarID(searchCalsResults.get_CalendarId());
+						createEventInput.set_ClientID(GOOGLE_CLIENT_ID);
+						createEventInput.set_ClientSecret(GOOGLE_CLIENT_SECRET);
+						createEventInput.set_EndDate(formattedDate);
+						createEventInput.set_EndTime(formattedTime);
+						createEventInput.set_EventDescription(venueName);
+						createEventInput.set_EventTitle(artistName);
+						createEventInput.set_RefreshToken(GOOGLE_REFRESH_TOKEN);
+						createEventInput.set_StartDate(formattedDate);
+						createEventInput.set_StartTime(formattedTime);
+
+						try {
+							// Execute CreateEvent (Note that in this case, we don't care about the results returned by the choreo).
+							createEvent.execute(createEventInput);
+
+							System.out.println("Created a Google Calendar event for " + bandName + " on " + formattedDate + " at " + formattedTime);
+						} catch(TembooException e) {
+							System.out.println("Uh-oh! Something went wrong created the event in the Google Calendar. The error from the choreo was: " + e.getMessage());
+						}
+
+					}
+				}
+			}
+
+		}
+	}
+</pre>
+</li>
+</ol>
