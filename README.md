@@ -7,7 +7,7 @@ Learn more, and get the Temboo SDK in your favorite language, at [temboo.com](ht
 
 ###Quickstart
  1. Sign up for a free account at [temboo.com](https://temboo.com)
- 2. Download and the Temboo Java SDK from [temboo.com/download](https://www.temboo.com/download) 
+ 2. Download the Temboo Java SDK from [temboo.com/download](https://www.temboo.com/download) 
  3. Clone the repo: `git clone git@github.com:temboo/java-examples.git`
  4. Open the example you'd like to use, and update the constants with your Temboo account information (and, if applicable, your 3rd party service credentials)
 
